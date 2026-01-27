@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Q&A 게시판</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <div class="container">
+      <h1>Q&A 게시판</h1>
+    </div>
+  </header>
+
+  <div class="container">
+    <!-- 검색 및 필터 섹션 -->
+    <div class="search-filter-section">
+      <div class="search-box">
+        <input type="text" id="searchInput" placeholder="질문 제목 또는 내용을 검색하세요...">
+        <button class="btn btn-primary" onclick="searchQuestions()">검색</button>
+      </div>
+      <div class="filter-sort-section">
+        <div class="filter-group">
+          <label for="categoryFilter">카테고리:</label>
+          <select id="categoryFilter" onchange="loadQuestions()">
+            <option value="all">전체</option>
+            <option value="자유">자유</option>
+            <option value="개발">개발</option>
+            <option value="질문">질문</option>
+            <option value="기타">기타</option>
+          </select>
+        </div>
+        <div class="filter-group">
+          <label for="sortBy">정렬:</label>
+          <select id="sortBy" onchange="loadQuestions()">
+            <option value="latest">최신순</option>
+            <option value="views">조회순</option>
+          </select>
+        </div>
+        <button class="btn btn-primary" onclick="location.href='write.html'">질문 작성</button>
+      </div>
+    </div>
+
+    <!-- 질문 목록 -->
+    <div class="question-list" id="questionList">
+      <!-- 질문 카드들이 여기에 동적으로 추가됩니다 -->
+    </div>
+
+    <!-- 빈 상태 메시지 -->
+    <div class="empty-state" id="emptyState" style="display: none;">
+      <div class="empty-state-icon">📝</div>
+      <div class="empty-state-message">등록된 질문이 없습니다.</div>
+    </div>
+  </div>
+
+  <!-- 삭제 확인 모달 -->
+  <div id="deleteModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">삭제 확인</div>
+      <div class="modal-body">
+        <p>삭제하려면 비밀번호를 입력하세요.</p>
+        <input type="password" id="deletePassword" placeholder="비밀번호 입력" style="width: 100%; padding: 10px; margin-top: 10px; border: 1px solid #ddd; border-radius: 5px;">
+        <p id="deleteError" style="color: #e74c3c; margin-top: 10px; display: none;">비밀번호가 일치하지 않습니다.</p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeDeleteModal()">취소</button>
+        <button class="btn btn-danger" onclick="confirmDelete()">삭제</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Firebase SDK -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+  
+  <!-- 설정 및 스크립트 -->
+  <script src="firebase-config.js"></script>
+  <script src="script.js"></script>
+  <script>
+    // 페이지 로드 시 질문 목록 불러오기
+    document.addEventListener('DOMContentLoaded', () => {
+      loadQuestions();
+      
+      // 검색 입력창에서 Enter 키 처리
+      document.getElementById('searchInput').addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+          searchQuestions();
+        }
+      });
+    });
+
+    let currentDeleteId = null;
+    let currentDeleteType = null; // 'question' or 'answer'
+
+    // 질문 목록 불러오기
+    async function loadQuestions() {
+      const questionList = document.getElementById('questionList');
+      const emptyState = document.getElementById('emptyState');
+      questionList.innerHTML = '';
+      
+      const categoryFilter = document.getElementById('categoryFilter').value;
+      const sortBy = document.getElementById('sortBy').value;
+      
+      try {
+        let query = db.collection('questions');
+        
+        // 카테고리 필터 적용
+        if (categoryFilter !== 'all') {
+          query = query.where('category', '==', categoryFilter);
+        }
+        
+        // 정렬 적용
+        if (sortBy === 'latest') {
+          query = query.orderBy('createdAt', 'desc');
+        } else {
+          query = query.orderBy('viewCount', 'desc');
+        }
+        
+        const snapshot = await query.get();
+        
+        if (snapshot.empty) {
+          emptyState.style.display = 'block';
+          return;
+        }
+        
+        emptyState.style.display = 'none';
+        
+        snapshot.forEach(doc => {
+          const question = doc.data();
+          const questionCard = createQuestionCard(doc.id, question);
+          questionList.appendChild(questionCard);
+        });
+      } catch (error) {
+        console.error('질문 목록 불러오기 실패:', error);
+        alert('질문 목록을 불러오는 중 오류가 발생했습니다.');
+      }
+    }
+
+    // 질문 카드 생성
+    function createQuestionCard(id, question) {
+      const card = document.createElement('div');
+      card.className = 'question-card';
+      card.onclick = () => {
+        location.href = `question.html?id=${id}`;
+      };
+      
+      const categoryBadge = question.category ? `<span class="question-category">${question.category}</span>` : '';
+      
+      card.innerHTML = `
+        <div class="question-header">
+          <div>
+            <div class="question-title">${escapeHtml(question.title)}${categoryBadge}</div>
+          </div>
+        </div>
+        <div class="question-content">${escapeHtml(question.content)}</div>
+        <div class="question-meta">
+          <span>작성자: ${escapeHtml(question.nickname)}</span>
+          <span>작성일: ${formatDate(question.createdAt)}</span>
+          <span>조회수: ${question.viewCount || 0}</span>
+        </div>
+      `;
+      
+      return card;
+    }
+
+    // 검색 기능
+    function searchQuestions() {
+      const searchTerm = document.getElementById('searchInput').value.trim().toLowerCase();
+      
+      if (!searchTerm) {
+        loadQuestions();
+        return;
+      }
+      
+      const questionList = document.getElementById('questionList');
+      const emptyState = document.getElementById('emptyState');
+      questionList.innerHTML = '';
+      
+      const categoryFilter = document.getElementById('categoryFilter').value;
+      const sortBy = document.getElementById('sortBy').value;
+      
+      db.collection('questions').get().then(snapshot => {
+        let questions = [];
+        
+        snapshot.forEach(doc => {
+          const question = doc.data();
+          const title = question.title.toLowerCase();
+          const content = question.content.toLowerCase();
+          
+          // 카테고리 필터 확인
+          if (categoryFilter !== 'all' && question.category !== categoryFilter) {
+            return;
+          }
+          
+          // 검색어가 제목이나 내용에 포함되어 있는지 확인
+          if (title.includes(searchTerm) || content.includes(searchTerm)) {
+            questions.push({ id: doc.id, ...question });
+          }
+        });
+        
+        // 정렬
+        if (sortBy === 'latest') {
+          questions.sort((a, b) => {
+            const dateA = a.createdAt?.toDate() || new Date(0);
+            const dateB = b.createdAt?.toDate() || new Date(0);
+            return dateB - dateA;
+          });
+        } else {
+          questions.sort((a, b) => (b.viewCount || 0) - (a.viewCount || 0));
+        }
+        
+        if (questions.length === 0) {
+          emptyState.style.display = 'block';
+          return;
+        }
+        
+        emptyState.style.display = 'none';
+        
+        questions.forEach(question => {
+          const questionCard = createQuestionCard(question.id, question);
+          questionList.appendChild(questionCard);
+        });
+      }).catch(error => {
+        console.error('검색 실패:', error);
+        alert('검색 중 오류가 발생했습니다.');
+      });
+    }
+
+    // 삭제 모달 열기
+    function openDeleteModal(id, type) {
+      currentDeleteId = id;
+      currentDeleteType = type;
+      document.getElementById('deleteModal').style.display = 'block';
+      document.getElementById('deletePassword').value = '';
+      document.getElementById('deleteError').style.display = 'none';
+      document.getElementById('deletePassword').focus();
+    }
+
+    // 삭제 모달 닫기
+    function closeDeleteModal() {
+      document.getElementById('deleteModal').style.display = 'none';
+      currentDeleteId = null;
+      currentDeleteType = null;
+    }
+
+    // 삭제 확인
+    async function confirmDelete() {
+      const password = document.getElementById('deletePassword').value;
+      const deleteError = document.getElementById('deleteError');
+      const correctPassword = 'jz2073jz';
+      
+      if (password !== correctPassword) {
+        deleteError.style.display = 'block';
+        return;
+      }
+      
+      try {
+        if (currentDeleteType === 'question') {
+          // 질문 삭제 시 관련 답변도 모두 삭제
+          const answersSnapshot = await db.collection('answers')
+            .where('questionId', '==', currentDeleteId)
+            .get();
+          
+          const deletePromises = answersSnapshot.docs.map(doc => doc.ref.delete());
+          await Promise.all(deletePromises);
+          
+          await db.collection('questions').doc(currentDeleteId).delete();
+          alert('질문이 삭제되었습니다.');
+          loadQuestions();
+        } else if (currentDeleteType === 'answer') {
+          await db.collection('answers').doc(currentDeleteId).delete();
+          alert('답변이 삭제되었습니다.');
+          // 질문 상세 페이지로 리다이렉트
+          const urlParams = new URLSearchParams(window.location.search);
+          const questionId = urlParams.get('id');
+          if (questionId) {
+            location.reload();
+          }
+        }
+        
+        closeDeleteModal();
+      } catch (error) {
+        console.error('삭제 실패:', error);
+        alert('삭제 중 오류가 발생했습니다.');
+      }
+    }
+
+    // 모달 외부 클릭 시 닫기
+    window.onclick = function(event) {
+      const modal = document.getElementById('deleteModal');
+      if (event.target === modal) {
+        closeDeleteModal();
+      }
+    }
+  </script>
+</body>
+</html>

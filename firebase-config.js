@@ -1,4 +1,4 @@
-// firebase-config.js
+// Firebase 설정
 const firebaseConfig = {
   apiKey: "AIzaSyCK-hHZBxftHwgH-oRiPZ0DOCqEGQX6lCw",
   authDomain: "qna2-92801.firebaseapp.com",
@@ -9,6 +9,6 @@ const firebaseConfig = {
   measurementId: "G-TPL9P4WJJ4"
 };
 
-// ❗ import 절대 쓰지 마
+// Firebase 초기화
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();

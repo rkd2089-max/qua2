@@ -15,19 +15,15 @@
 
   <div class="container">
     <!-- 질문 상세 -->
-    <div class="question-detail" id="questionDetail">
-      <!-- 질문 내용이 여기에 동적으로 추가됩니다 -->
-    </div>
+    <div class="question-detail" id="questionDetail"></div>
 
     <!-- 답변 섹션 -->
     <div class="answers-section" id="answers-section">
       <div class="answers-header">답변</div>
-      
+
       <!-- 답변 목록 -->
-      <div class="answer-list" id="answerList">
-        <!-- 답변들이 여기에 동적으로 추가됩니다 -->
-      </div>
-      
+      <div class="answer-list" id="answerList"></div>
+
       <!-- 답변 작성 폼 -->
       <div class="answer-form">
         <h3 style="margin-bottom: 15px; color: #2c3e50;">답변 작성</h3>
@@ -74,58 +70,51 @@
   <!-- Firebase SDK -->
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
-  
-  <!-- 설정 및 스크립트 -->
+
+  <!-- Firebase 설정 -->
   <script src="firebase-config.js"></script>
-  <script src="script.js"></script>
+
   <script>
     let currentQuestionId = null;
     let currentDeleteId = null;
     let currentDeleteType = null;
 
-    // 페이지 로드 시 질문 상세 불러오기
     document.addEventListener('DOMContentLoaded', () => {
       const urlParams = new URLSearchParams(window.location.search);
       currentQuestionId = urlParams.get('id');
-      
+
       if (currentQuestionId) {
         loadQuestionDetail(currentQuestionId);
-        loadAnswers(currentQuestionId);
+        loadAnswers(currentQuestionId); // 실시간 답변 로딩
       } else {
         showEmptyState();
       }
     });
 
-    // 질문 상세 불러오기
     async function loadQuestionDetail(questionId) {
       try {
         const doc = await db.collection('questions').doc(questionId).get();
-        
-        if (!doc.exists) {
-          showEmptyState();
-          return;
-        }
-        
+        if (!doc.exists) return showEmptyState();
+
         const question = doc.data();
         const questionDetail = document.getElementById('questionDetail');
-        
+
         // 조회수 증가
         await db.collection('questions').doc(questionId).update({
           viewCount: firebase.firestore.FieldValue.increment(1)
         });
-        
-        // 조회수 표시를 위해 다시 불러오기
+
         const updatedDoc = await db.collection('questions').doc(questionId).get();
         const updatedQuestion = updatedDoc.data();
-        
+
         const categoryBadge = question.category ? `<span class="question-category">${question.category}</span>` : '';
-        
+
         questionDetail.innerHTML = `
           <div class="question-detail-header">
             <div class="question-detail-title">${escapeHtml(question.title)}${categoryBadge}</div>
             <div class="question-detail-meta">
               <span>작성자: ${escapeHtml(question.nickname)}</span>
-              <span>작성일: ${formatDate(question.createdAt)}</span>
+              <span>작성일: ${formatDate(question.createdAt?.toDate() || new Date())}</span>
               <span>조회수: ${updatedQuestion.viewCount || 0}</span>
             </div>
           </div>
@@ -141,72 +130,76 @@
       }
     }
 
-    // 답변 목록 불러오기
-    async function loadAnswers(questionId) {
-      try {
-        const snapshot = await db.collection('answers')
-          .where('questionId', '==', questionId)
-          .orderBy('createdAt', 'asc')
-          .get();
-        
-        const answerList = document.getElementById('answerList');
-        answerList.innerHTML = '';
-        
-        if (snapshot.empty) {
-          answerList.innerHTML = '<div class="empty-state" style="padding: 40px;"><div class="empty-state-message">아직 답변이 없습니다.</div></div>';
-          return;
-        }
-        
-        snapshot.forEach(doc => {
-          const answer = doc.data();
-          const answerCard = createAnswerCard(doc.id, answer);
-          answerList.appendChild(answerCard);
+    function loadAnswers(questionId) {
+      const answerList = document.getElementById('answerList');
+
+      // orderBy 없이 조회 (복합 인덱스 불필요) → 가져온 뒤 작성일 오래된 순으로 정렬
+      db.collection('answers')
+        .where('questionId', '==', questionId)
+        .onSnapshot(snapshot => {
+          answerList.innerHTML = '';
+
+          if (snapshot.empty) {
+            answerList.innerHTML = '<div class="empty-state" style="padding: 40px;"><div class="empty-state-message">아직 답변이 없습니다.</div></div>';
+            return;
+          }
+
+          const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+          docs.sort((a, b) => {
+            const timeA = a.createdAt && a.createdAt.toDate ? a.createdAt.toDate().getTime() : 0;
+            const timeB = b.createdAt && b.createdAt.toDate ? b.createdAt.toDate().getTime() : 0;
+            return timeA - timeB; // 오래된 순
+          });
+
+          docs.forEach(({ id, ...answer }) => {
+            const answerCard = createAnswerCard(id, answer);
+            answerList.appendChild(answerCard);
+          });
+        }, err => {
+          console.error('답변 목록 불러오기 실패:', err);
+          document.getElementById('answerList').innerHTML = '<div class="empty-state" style="padding: 40px;"><div class="empty-state-message">답변을 불러오지 못했습니다.</div></div>';
         });
-      } catch (error) {
-        console.error('답변 목록 불러오기 실패:', error);
-        // createdAt 필드가 없을 수 있으므로 인덱스 오류는 무시
-        if (error.code !== 'failed-precondition') {
-          alert('답변 목록을 불러오는 중 오류가 발생했습니다.');
-        }
-      }
     }
 
-    // 답변 카드 생성
     function createAnswerCard(id, answer) {
       const card = document.createElement('div');
       card.className = 'answer-card';
-      
+
+      const createdAtDate = answer.createdAt?.toDate() || new Date();
+
       card.innerHTML = `
         <div class="answer-header">
           <span class="answer-author">${escapeHtml(answer.nickname)}</span>
-          <span class="answer-date">${formatDate(answer.createdAt)}</span>
+          <span class="answer-date">${formatDate(createdAtDate)}</span>
         </div>
         <div class="answer-content">${escapeHtml(answer.content)}</div>
         <div class="answer-actions">
           <button class="btn btn-danger" style="padding: 6px 12px; font-size: 0.9rem;" onclick="event.stopPropagation(); openDeleteModal('${id}', 'answer')">삭제</button>
         </div>
       `;
-      
+
       return card;
     }
 
-    // 답변 등록
     async function submitAnswer(event) {
       event.preventDefault();
-      
       if (!currentQuestionId) {
         alert('질문 정보를 불러올 수 없습니다.');
         return;
       }
-      
+
       const nickname = document.getElementById('answerNickname').value.trim();
       const content = document.getElementById('answerContent').value.trim();
-      
       if (!nickname || !content) {
         alert('닉네임과 답변 내용을 입력해주세요.');
         return;
       }
-      
+
+      const submitBtn = document.querySelector('#answerForm button[type="submit"]');
+      const originalText = submitBtn.textContent;
+      submitBtn.disabled = true;
+      submitBtn.textContent = '등록 중...';
+
       try {
         await db.collection('answers').add({
           questionId: currentQuestionId,
@@ -214,24 +207,30 @@
           content: content,
           createdAt: firebase.firestore.FieldValue.serverTimestamp()
         });
-        
+
         document.getElementById('answerForm').reset();
         alert('답변이 등록되었습니다.');
-        loadAnswers(currentQuestionId);
       } catch (error) {
         console.error('답변 등록 실패:', error);
-        alert('답변 등록 중 오류가 발생했습니다.');
+        let msg = '답변 등록 중 오류가 발생했습니다.';
+        if (error.code === 'permission-denied') {
+          msg = '권한이 없습니다. Firebase 콘솔 → Firestore → 규칙에서 읽기/쓰기를 허용해주세요.';
+        } else if (error.message) {
+          msg += ' (' + error.message + ')';
+        }
+        alert(msg);
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = originalText;
       }
     }
 
-    // 빈 상태 표시
     function showEmptyState() {
       document.getElementById('questionDetail').style.display = 'none';
       document.getElementById('answers-section').style.display = 'none';
       document.getElementById('emptyState').style.display = 'block';
     }
 
-    // 삭제 모달 열기
     function openDeleteModal(id, type) {
       currentDeleteId = id;
       currentDeleteType = type;
@@ -241,43 +240,38 @@
       document.getElementById('deletePassword').focus();
     }
 
-    // 삭제 모달 닫기
     function closeDeleteModal() {
       document.getElementById('deleteModal').style.display = 'none';
       currentDeleteId = null;
       currentDeleteType = null;
     }
 
-    // 삭제 확인
     async function confirmDelete() {
       const password = document.getElementById('deletePassword').value;
       const deleteError = document.getElementById('deleteError');
       const correctPassword = 'jz2073jz';
-      
+
       if (password !== correctPassword) {
         deleteError.style.display = 'block';
         return;
       }
-      
+
       try {
         if (currentDeleteType === 'question') {
-          // 질문 삭제 시 관련 답변도 모두 삭제
           const answersSnapshot = await db.collection('answers')
             .where('questionId', '==', currentDeleteId)
             .get();
-          
           const deletePromises = answersSnapshot.docs.map(doc => doc.ref.delete());
           await Promise.all(deletePromises);
-          
+
           await db.collection('questions').doc(currentDeleteId).delete();
           alert('질문이 삭제되었습니다.');
           location.href = 'index.html';
         } else if (currentDeleteType === 'answer') {
           await db.collection('answers').doc(currentDeleteId).delete();
           alert('답변이 삭제되었습니다.');
-          loadAnswers(currentQuestionId);
         }
-        
+
         closeDeleteModal();
       } catch (error) {
         console.error('삭제 실패:', error);
@@ -285,12 +279,25 @@
       }
     }
 
-    // 모달 외부 클릭 시 닫기
     window.onclick = function(event) {
       const modal = document.getElementById('deleteModal');
-      if (event.target === modal) {
-        closeDeleteModal();
-      }
+      if (event.target === modal) closeDeleteModal();
+    }
+
+    // 유틸 함수: HTML escape
+    function escapeHtml(text) {
+      return text
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
+    // 유틸 함수: 날짜 포맷
+    function formatDate(date) {
+      const d = new Date(date);
+      return `${d.getFullYear()}-${(d.getMonth()+1).toString().padStart(2,'0')}-${d.getDate().toString().padStart(2,'0')} ${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`;
     }
   </script>
 </body>

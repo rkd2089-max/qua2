@@ -1,0 +1,12 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Q&A 게시판: 로그인 없이 읽기/쓰기 허용
+    match /questions/{questionId} {
+      allow read, write: if true;
+    }
+    match /answers/{answerId} {
+      allow read, write: if true;
+    }
+  }
+}
